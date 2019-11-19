@@ -5,22 +5,94 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
+import * as webpack from 'webpack';
 import { Budget } from '../../browser/schema';
-
-export interface Compilation {
-  assets: { [name: string]: { size: () => number } };
-  chunks: { name: string, files: string[], isOnlyInitial: () => boolean }[];
-  warnings: string[];
-  errors: string[];
-}
 
 export interface Size {
   size: number;
   label?: string;
 }
 
-export function calculateSizes(budget: Budget, compilation: Compilation): Size[] {
-  const calculatorMap = {
+export interface Threshold {
+  limit: number;
+  type: ThresholdType;
+  severity: ThresholdSeverity;
+}
+
+export enum ThresholdType {
+  MAX = 'maximum',
+  MIN = 'minimum',
+}
+
+export enum ThresholdSeverity {
+  WARNING = 'warning',
+  ERROR = 'error',
+}
+
+export function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
+  if (budget.maximumWarning) {
+    yield {
+      limit: calculateBytes(budget.maximumWarning, budget.baseline, 1),
+      type: ThresholdType.MAX,
+      severity: ThresholdSeverity.WARNING,
+    };
+  }
+
+  if (budget.maximumError) {
+    yield {
+      limit: calculateBytes(budget.maximumError, budget.baseline, 1),
+      type: ThresholdType.MAX,
+      severity: ThresholdSeverity.ERROR,
+    };
+  }
+
+  if (budget.minimumWarning) {
+    yield {
+      limit: calculateBytes(budget.minimumWarning, budget.baseline, -1),
+      type: ThresholdType.MIN,
+      severity: ThresholdSeverity.WARNING,
+    };
+  }
+
+  if (budget.minimumError) {
+    yield {
+      limit: calculateBytes(budget.minimumError, budget.baseline, -1),
+      type: ThresholdType.MIN,
+      severity: ThresholdSeverity.ERROR,
+    };
+  }
+
+  if (budget.warning) {
+    yield {
+      limit: calculateBytes(budget.warning, budget.baseline, -1),
+      type: ThresholdType.MIN,
+      severity: ThresholdSeverity.WARNING,
+    };
+
+    yield {
+      limit: calculateBytes(budget.warning, budget.baseline, 1),
+      type: ThresholdType.MAX,
+      severity: ThresholdSeverity.WARNING,
+    };
+  }
+
+  if (budget.error) {
+    yield {
+      limit: calculateBytes(budget.error, budget.baseline, -1),
+      type: ThresholdType.MIN,
+      severity: ThresholdSeverity.ERROR,
+    };
+
+    yield {
+      limit: calculateBytes(budget.error, budget.baseline, 1),
+      type: ThresholdType.MAX,
+      severity: ThresholdSeverity.ERROR,
+    };
+  }
+}
+
+export function calculateSizes(budget: Budget, stats: webpack.Stats.ToJsonOutput): Size[] {
+  const calculatorMap: Record<Budget['type'], { new(...args: any[]): Calculator }> = {
     all: AllCalculator,
     allScript: AllScriptCalculator,
     any: AnyCalculator,
@@ -31,13 +103,25 @@ export function calculateSizes(budget: Budget, compilation: Compilation): Size[]
   };
 
   const ctor = calculatorMap[budget.type];
-  const calculator = new ctor(budget, compilation);
+  const {chunks, assets} = stats;
+  if (!chunks) {
+    throw new Error('Webpack stats output did not include chunk information.');
+  }
+  if (!assets) {
+    throw new Error('Webpack stats output did not include asset information.');
+  }
+
+  const calculator = new ctor(budget, chunks, assets);
 
   return calculator.calculate();
 }
 
 export abstract class Calculator {
-  constructor (protected budget: Budget, protected compilation: Compilation) {}
+  constructor (
+    protected budget: Budget,
+    protected chunks: Exclude<webpack.Stats.ToJsonOutput['chunks'], undefined>,
+    protected assets: Exclude<webpack.Stats.ToJsonOutput['assets'], undefined>,
+  ) {}
 
   abstract calculate(): Size[];
 }
@@ -47,11 +131,24 @@ export abstract class Calculator {
  */
 class BundleCalculator extends Calculator {
   calculate() {
-    const size: number = this.compilation.chunks
-      .filter(chunk => chunk.name === this.budget.name)
+    const budgetName = this.budget.name;
+    if (!budgetName) {
+      return [];
+    }
+
+    const size: number = this.chunks
+      .filter(chunk => chunk.names.indexOf(budgetName) !== -1)
       .reduce((files, chunk) => [...files, ...chunk.files], [])
       .filter((file: string) => !file.endsWith('.map'))
-      .map((file: string) => this.compilation.assets[file].size())
+      .map((file: string) => {
+        const asset = this.assets.find((asset) => asset.name === file);
+        if (!asset) {
+          throw new Error(`Could not find asset for file: ${file}`);
+        }
+
+        return asset;
+      })
+      .map((asset) => asset.size)
       .reduce((total: number, size: number) => total + size, 0);
 
     return [{size, label: this.budget.name}];
@@ -63,11 +160,19 @@ class BundleCalculator extends Calculator {
  */
 class InitialCalculator extends Calculator {
   calculate() {
-    const initialChunks = this.compilation.chunks.filter(chunk => chunk.isOnlyInitial());
-    const size: number = initialChunks
+    const size = this.chunks
+      .filter(chunk => chunk.initial)
       .reduce((files, chunk) => [...files, ...chunk.files], [])
       .filter((file: string) => !file.endsWith('.map'))
-      .map((file: string) => this.compilation.assets[file].size())
+      .map((file: string) => {
+        const asset = this.assets.find((asset) => asset.name === file);
+        if (!asset) {
+          throw new Error(`Could not find asset for file: ${file}`);
+        }
+
+        return asset;
+      })
+      .map((asset) => asset.size)
       .reduce((total: number, size: number) => total + size, 0);
 
     return [{size, label: 'initial'}];
@@ -79,10 +184,9 @@ class InitialCalculator extends Calculator {
  */
 class AllScriptCalculator extends Calculator {
   calculate() {
-    const size: number = Object.keys(this.compilation.assets)
-      .filter(key => key.endsWith('.js'))
-      .map(key => this.compilation.assets[key])
-      .map(asset => asset.size())
+    const size = this.assets
+      .filter((asset) => asset.name.endsWith('.js'))
+      .map(asset => asset.size)
       .reduce((total: number, size: number) => total + size, 0);
 
     return [{size, label: 'total scripts'}];
@@ -94,9 +198,9 @@ class AllScriptCalculator extends Calculator {
  */
 class AllCalculator extends Calculator {
   calculate() {
-    const size: number = Object.keys(this.compilation.assets)
-      .filter(key => !key.endsWith('.map'))
-      .map(key => this.compilation.assets[key].size())
+    const size = this.assets
+      .filter(asset => !asset.name.endsWith('.map'))
+      .map(asset => asset.size)
       .reduce((total: number, size: number) => total + size, 0);
 
     return [{size, label: 'total'}];
@@ -108,11 +212,11 @@ class AllCalculator extends Calculator {
  */
 class AnyComponentStyleCalculator extends Calculator {
   calculate() {
-    return Object.keys(this.compilation.assets)
-      .filter(key => key.endsWith('.css'))
-      .map(key => ({
-        size: this.compilation.assets[key].size(),
-        label: key,
+    return this.assets
+      .filter(asset => asset.name.endsWith('.css'))
+      .map(asset => ({
+        size: asset.size,
+        label: asset.name,
       }));
   }
 }
@@ -122,16 +226,12 @@ class AnyComponentStyleCalculator extends Calculator {
  */
 class AnyScriptCalculator extends Calculator {
   calculate() {
-    return Object.keys(this.compilation.assets)
-      .filter(key => key.endsWith('.js'))
-      .map(key => {
-        const asset = this.compilation.assets[key];
-
-        return {
-          size: asset.size(),
-          label: key,
-        };
-      });
+    return this.assets
+      .filter(asset => asset.name.endsWith('.js'))
+      .map(asset => ({
+        size: asset.size,
+        label: asset.name,
+      }));
   }
 }
 
@@ -140,16 +240,12 @@ class AnyScriptCalculator extends Calculator {
  */
 class AnyCalculator extends Calculator {
   calculate() {
-    return Object.keys(this.compilation.assets)
-      .filter(key => !key.endsWith('.map'))
-      .map(key => {
-        const asset = this.compilation.assets[key];
-
-        return {
-          size: asset.size(),
-          label: key,
-        };
-      });
+    return this.assets
+      .filter(asset => !asset.name.endsWith('.map'))
+      .map(asset => ({
+        size: asset.size,
+        label: asset.name,
+      }));
   }
 }
 

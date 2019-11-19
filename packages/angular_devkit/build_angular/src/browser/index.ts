@@ -7,7 +7,7 @@
  */
 import { BuilderContext, BuilderOutput, createBuilder } from '@angular-devkit/architect';
 import { EmittedFiles, WebpackLoggingCallback, runWebpack } from '@angular-devkit/build-webpack';
-import { join, json, logging, normalize, tags, virtualFs } from '@angular-devkit/core';
+import { join, json, logging, normalize, tags, terminal, virtualFs } from '@angular-devkit/core';
 import { NodeJsSyncHost } from '@angular-devkit/core/node';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,6 +27,7 @@ import {
   getWorkerConfig,
   normalizeExtraEntryPoints,
 } from '../angular-cli-files/models/webpack-configs';
+import { ThresholdSeverity, calculateSizes, calculateThresholds, ThresholdType, Threshold } from '../angular-cli-files/utilities/bundle-calculator';
 import {
   IndexHtmlTransform,
   writeIndexHtml,
@@ -34,6 +35,7 @@ import {
 import { readTsconfig } from '../angular-cli-files/utilities/read-tsconfig';
 import { augmentAppWithServiceWorker } from '../angular-cli-files/utilities/service-worker';
 import {
+  formatSize,
   generateBuildStats,
   generateBundleStats,
   statsErrorsToString,
@@ -72,6 +74,7 @@ import {
 import { Schema as BrowserBuilderSchema } from './schema';
 
 const cacheDownlevelPath = cachingDisabled ? undefined : findCachePath('angular-build-dl');
+const {bold, red, yellow} = terminal;
 
 export type BrowserBuilderOutput = json.JsonObject &
   BuilderOutput & {
@@ -592,34 +595,55 @@ export function buildWebpackBrowser(
               }
 
               let bundleInfoText = '';
-              const processedNames = new Set<string>();
-              for (const result of processResults) {
-                processedNames.add(result.name);
-
-                const chunk =
-                  webpackStats &&
-                  webpackStats.chunks &&
-                  webpackStats.chunks.find(c => result.name === c.id.toString());
-                if (result.original) {
-                  bundleInfoText +=
-                    '\n' + generateBundleInfoStats(result.name, result.original, chunk);
-                }
-                if (result.downlevel) {
-                  bundleInfoText +=
-                    '\n' + generateBundleInfoStats(result.name, result.downlevel, chunk);
+              if (webpackStats && webpackStats.chunks) {
+                for (const chunk of webpackStats.chunks) {
+                  const result = processResults.find((result) => result.name === chunk.id.toString());
+                  if (result) {
+                    if (result.original) {
+                      bundleInfoText +=
+                        '\n' + generateBundleInfoStats(result.name, result.original, chunk);
+                    }
+                    if (result.downlevel) {
+                      bundleInfoText +=
+                        '\n' + generateBundleInfoStats(result.name, result.downlevel, chunk);
+                    }
+                  } else {
+                    const asset =
+                    webpackStats.assets && webpackStats.assets.find(a => a.name === chunk.files[0]);
+                    bundleInfoText +=
+                      '\n' + generateBundleStats({ ...chunk, size: asset && asset.size }, true);
+                  }
                 }
               }
 
-              if (webpackStats && webpackStats.chunks) {
-                for (const chunk of webpackStats.chunks) {
-                  if (processedNames.has(chunk.id.toString())) {
-                    continue;
-                  }
+              const budgets = options.budgets || [];
+              for (const budget of budgets) {
+                const sizes = calculateSizes(budget, webpackStats);
+                for (const threshold of calculateThresholds(budget)) {
+                  for (const {size, label} of sizes) {
+                    if (exceededThreshold(size, threshold)) {
+                      const colorize = colorizeSeverity(threshold.severity);
+                      const severity = stringifySeverity(threshold.severity);
 
-                  const asset =
-                    webpackStats.assets && webpackStats.assets.find(a => a.name === chunk.files[0]);
-                  bundleInfoText +=
-                    '\n' + generateBundleStats({ ...chunk, size: asset && asset.size }, true);
+                      switch (threshold.type) {
+                        case ThresholdType.MAX: {
+                          const sizeDifference = formatSize(size - threshold.limit);
+                          bundleInfoText += bold(colorize(`\n${severity.toUpperCase()}:`
+                            + ` Exceeded maximum budget for ${label}. Budget ${
+                              formatSize(threshold.limit)} was exceeded by ${
+                              sizeDifference} with a total of ${formatSize(size)}.`));
+                          break;
+                        } case ThresholdType.MIN: {
+                          const sizeDifference = formatSize(threshold.limit - size);
+                          bundleInfoText += bold(colorize(`\n${severity.toUpperCase()}:`
+                            + ` Failed to meet minimum budget for ${label}. Budget ${
+                              formatSize(threshold.limit)} was not met by ${
+                              sizeDifference} with a total of ${formatSize(size)}.`));
+                          break;
+                        }
+                      }
+                    }
+                  }
                 }
               }
 
@@ -750,6 +774,27 @@ function mapErrorToMessage(error: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function stringifySeverity(severity: ThresholdSeverity): string {
+  switch (severity) {
+    case ThresholdSeverity.WARNING: return 'Warning';
+    case ThresholdSeverity.ERROR: return 'Error';
+  }
+}
+
+function colorizeSeverity(severity: ThresholdSeverity): (text: string) => string {
+  switch (severity) {
+    case ThresholdSeverity.WARNING: return yellow;
+    case ThresholdSeverity.ERROR: return red;
+  }
+}
+
+function exceededThreshold(size: number, threshold: Threshold): boolean {
+  switch (threshold.type) {
+    case ThresholdType.MAX: return size > threshold.limit;
+    case ThresholdType.MIN: return size < threshold.limit;
+  }
 }
 
 export default createBuilder<json.JsonObject & BrowserBuilderSchema>(buildWebpackBrowser);
