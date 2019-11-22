@@ -8,6 +8,7 @@
 import { Compiler, compilation } from 'webpack';
 import { Budget, Type } from '../../browser/schema';
 import { ThresholdSeverity, checkBudgets } from '../utilities/bundle-calculator';
+import { ProcessBundleResult } from '../../utils/process-bundle';
 
 export interface BundleBudgetPluginOptions {
   budgets: Budget[];
@@ -44,8 +45,12 @@ export class BundleBudgetPlugin {
   }
 
   private runChecks(budgets: Budget[], compilation: compilation.Compilation) {
+    // No process bundle results because this plugin is only used when differential
+    // builds are disabled.
+    const processResults: ProcessBundleResult[] = [];
+
     const stats = compilation.getStats().toJson();
-    for (const {severity, message} of checkBudgets(budgets, stats)) {
+    for (const {severity, message} of checkBudgets(budgets, stats, processResults)) {
       switch (severity) {
         case ThresholdSeverity.Warning:
           compilation.warnings.push(`budgets: ${message}`);

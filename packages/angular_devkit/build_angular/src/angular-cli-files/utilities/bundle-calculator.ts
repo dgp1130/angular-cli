@@ -6,6 +6,7 @@
  * found in the LICENSE file at https://angular.io/license
  */
 import * as webpack from 'webpack';
+import { ProcessBundleFile, ProcessBundleResult } from '../../../src/utils/process-bundle';
 import { Budget } from '../../browser/schema';
 import { formatSize } from '../utilities/stats';
 
@@ -28,6 +29,11 @@ enum ThresholdType {
 export enum ThresholdSeverity {
   Warning = 'warning',
   Error = 'error',
+}
+
+enum DifferentialBuildType {
+  ORIGINAL = 'es2015',
+  DOWNLEVEL = 'es5',
 }
 
 function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
@@ -92,8 +98,15 @@ function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
   }
 }
 
-function calculateSizes(budget: Budget, stats: webpack.Stats.ToJsonOutput): Size[] {
-  const calculatorMap: Record<Budget['type'], { new(...args: any[]): Calculator }> = {
+/**
+ * Calculates the sizes for bundles in the budget type provided.
+ */
+function calculateSizes(
+  budget: Budget,
+  stats: webpack.Stats.ToJsonOutput,
+  processResults: ProcessBundleResult[],
+): Size[] {
+  const calculatorMap: Record<Budget['type'], { new(...args: unknown[]): Calculator }> = {
     all: AllCalculator,
     allScript: AllScriptCalculator,
     any: AnyCalculator,
@@ -112,19 +125,55 @@ function calculateSizes(budget: Budget, stats: webpack.Stats.ToJsonOutput): Size
     throw new Error('Webpack stats output did not include asset information.');
   }
 
-  const calculator = new ctor(budget, chunks, assets);
+  const calculator = new ctor(budget, chunks, assets, processResults);
 
   return calculator.calculate();
 }
 
+type ArrayElement<T> = T extends Array<infer U> ? U : never;
+type Chunk = ArrayElement<Exclude<webpack.Stats.ToJsonOutput['chunks'], undefined>>;
+type Asset = ArrayElement<Exclude<webpack.Stats.ToJsonOutput['assets'], undefined>>;
 abstract class Calculator {
   constructor (
     protected budget: Budget,
-    protected chunks: Exclude<webpack.Stats.ToJsonOutput['chunks'], undefined>,
-    protected assets: Exclude<webpack.Stats.ToJsonOutput['assets'], undefined>,
+    protected chunks: Chunk[],
+    protected assets: Asset[],
+    protected processResults: ProcessBundleResult[],
   ) {}
 
   abstract calculate(): Size[];
+
+  /** Calculates the size of the given chunk for the provided build type. */
+  protected calculateChunkSize(
+    chunk: Chunk,
+    buildType: DifferentialBuildType,
+  ): number {
+    // Look for a process result containing different builds for this chunk.
+    const processResult = this.processResults
+        .find((processResult) => processResult.name === chunk.id.toString());
+
+    if (processResult) {
+      // Found a differential build, use the correct size information.
+      const processResultFile = getDifferentialBuildResult(
+        processResult, buildType);
+
+      return processResultFile && processResultFile.size || 0;
+    } else {
+      // No differential builds, get the chunk size by summing its assets.
+      return chunk.files
+          .filter((file) => !file.endsWith('.map'))
+          .map((file: string) => {
+            const asset = this.assets.find((asset) => asset.name === file);
+            if (!asset) {
+              throw new Error(`Could not find asset for file: ${file}`);
+            }
+
+            return asset;
+          })
+          .map((asset) => asset.size)
+          .reduce((l, r) => l + r);
+    }
+  }
 }
 
 /**
@@ -137,22 +186,32 @@ class BundleCalculator extends Calculator {
       return [];
     }
 
-    const size: number = this.chunks
-      .filter(chunk => chunk.names.indexOf(budgetName) !== -1)
-      .reduce((files, chunk) => [...files, ...chunk.files], [])
-      .filter((file: string) => !file.endsWith('.map'))
-      .map((file: string) => {
-        const asset = this.assets.find((asset) => asset.name === file);
-        if (!asset) {
-          throw new Error(`Could not find asset for file: ${file}`);
-        }
+    // The chunk may or may not have differential builds. Compute the size for
+    // each then check afterwards if they are all the same.
+    const buildSizes = Object.values(DifferentialBuildType).map((buildType) => {
+      const size = this.chunks
+          .filter(chunk => chunk.names.indexOf(budgetName) !== -1)
+          .map((chunk) => this.calculateChunkSize(chunk, buildType))
+          .reduce((l, r) => l + r);
 
-        return asset;
-      })
-      .map((asset) => asset.size)
-      .reduce((total: number, size: number) => total + size, 0);
+      return {size, label: `${this.budget.name}-${buildType}`};
+    });
 
-    return [{size, label: this.budget.name}];
+    // If there are multiple sizes, then there are differential builds. Display
+    // them all.
+    if (!allEquivalent(buildSizes.map((buildSize) => buildSize.size))) {
+      return buildSizes;
+    }
+
+    if (buildSizes.length === 0) {
+      return [];
+    }
+
+    // Only one size, must not be a differential build.
+    return [{
+      label: this.budget.name,
+      size: buildSizes[0].size,
+    }];
   }
 }
 
@@ -161,22 +220,15 @@ class BundleCalculator extends Calculator {
  */
 class InitialCalculator extends Calculator {
   calculate() {
-    const size = this.chunks
-      .filter(chunk => chunk.initial)
-      .reduce((files, chunk) => [...files, ...chunk.files], [])
-      .filter((file: string) => !file.endsWith('.map'))
-      .map((file: string) => {
-        const asset = this.assets.find((asset) => asset.name === file);
-        if (!asset) {
-          throw new Error(`Could not find asset for file: ${file}`);
-        }
-
-        return asset;
-      })
-      .map((asset) => asset.size)
-      .reduce((total: number, size: number) => total + size, 0);
-
-    return [{size, label: 'initial'}];
+    return Object.values(DifferentialBuildType).map((buildType) => {
+      return {
+        label: `initial-${buildType}`,
+        size: this.chunks
+            .filter(chunk => chunk.initial)
+            .map((chunk) => this.calculateChunkSize(chunk, buildType))
+            .reduce((l, r) => l + r),
+      };
+    });
   }
 }
 
@@ -289,10 +341,12 @@ function calculateBytes(
 }
 
 export function* checkBudgets(
-    budgets: Budget[], webpackStats: webpack.Stats.ToJsonOutput):
-    IterableIterator<{ severity: ThresholdSeverity, message: string }> {
+    budgets: Budget[],
+    webpackStats: webpack.Stats.ToJsonOutput,
+    processResults: ProcessBundleResult[],
+): IterableIterator<{ severity: ThresholdSeverity, message: string }> {
   for (const budget of budgets) {
-    const sizes = calculateSizes(budget, webpackStats);
+    const sizes = calculateSizes(budget, webpackStats, processResults);
     for (const threshold of calculateThresholds(budget)) {
       for (const {size, label} of sizes) {
         switch (threshold.type) {
@@ -327,4 +381,30 @@ export function* checkBudgets(
       }
     }
   }
+}
+
+/** Returns the {@link ProcessBundleFile} for the given {@link DifferentialBuildType}. */
+function getDifferentialBuildResult(
+    processResult: ProcessBundleResult, buildType: DifferentialBuildType):
+    ProcessBundleFile|null {
+  switch (buildType) {
+    case DifferentialBuildType.ORIGINAL: return processResult.original || null;
+    case DifferentialBuildType.DOWNLEVEL: return processResult.downlevel || null;
+  }
+}
+
+/** Returns whether or not all items in the list are equivalent to each other. */
+function allEquivalent<T>(items: T[]): boolean {
+  if (items.length === 0) {
+    return true;
+  }
+
+  const first = items[0];
+  for (const item of items.slice(1)) {
+    if (item !== first) {
+      return false;
+    }
+  }
+
+  return true;
 }
