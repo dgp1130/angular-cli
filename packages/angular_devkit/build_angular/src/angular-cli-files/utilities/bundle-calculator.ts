@@ -7,91 +7,92 @@
  */
 import * as webpack from 'webpack';
 import { Budget } from '../../browser/schema';
+import { formatSize } from '../utilities/stats';
 
-export interface Size {
+interface Size {
   size: number;
   label?: string;
 }
 
-export interface Threshold {
+interface Threshold {
   limit: number;
   type: ThresholdType;
   severity: ThresholdSeverity;
 }
 
-export enum ThresholdType {
-  MAX = 'maximum',
-  MIN = 'minimum',
+enum ThresholdType {
+  Max = 'maximum',
+  Min = 'minimum',
 }
 
 export enum ThresholdSeverity {
-  WARNING = 'warning',
-  ERROR = 'error',
+  Warning = 'warning',
+  Error = 'error',
 }
 
-export function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
+function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
   if (budget.maximumWarning) {
     yield {
       limit: calculateBytes(budget.maximumWarning, budget.baseline, 1),
-      type: ThresholdType.MAX,
-      severity: ThresholdSeverity.WARNING,
+      type: ThresholdType.Max,
+      severity: ThresholdSeverity.Warning,
     };
   }
 
   if (budget.maximumError) {
     yield {
       limit: calculateBytes(budget.maximumError, budget.baseline, 1),
-      type: ThresholdType.MAX,
-      severity: ThresholdSeverity.ERROR,
+      type: ThresholdType.Max,
+      severity: ThresholdSeverity.Error,
     };
   }
 
   if (budget.minimumWarning) {
     yield {
       limit: calculateBytes(budget.minimumWarning, budget.baseline, -1),
-      type: ThresholdType.MIN,
-      severity: ThresholdSeverity.WARNING,
+      type: ThresholdType.Min,
+      severity: ThresholdSeverity.Warning,
     };
   }
 
   if (budget.minimumError) {
     yield {
       limit: calculateBytes(budget.minimumError, budget.baseline, -1),
-      type: ThresholdType.MIN,
-      severity: ThresholdSeverity.ERROR,
+      type: ThresholdType.Min,
+      severity: ThresholdSeverity.Error,
     };
   }
 
   if (budget.warning) {
     yield {
       limit: calculateBytes(budget.warning, budget.baseline, -1),
-      type: ThresholdType.MIN,
-      severity: ThresholdSeverity.WARNING,
+      type: ThresholdType.Min,
+      severity: ThresholdSeverity.Warning,
     };
 
     yield {
       limit: calculateBytes(budget.warning, budget.baseline, 1),
-      type: ThresholdType.MAX,
-      severity: ThresholdSeverity.WARNING,
+      type: ThresholdType.Max,
+      severity: ThresholdSeverity.Warning,
     };
   }
 
   if (budget.error) {
     yield {
       limit: calculateBytes(budget.error, budget.baseline, -1),
-      type: ThresholdType.MIN,
-      severity: ThresholdSeverity.ERROR,
+      type: ThresholdType.Min,
+      severity: ThresholdSeverity.Error,
     };
 
     yield {
       limit: calculateBytes(budget.error, budget.baseline, 1),
-      type: ThresholdType.MAX,
-      severity: ThresholdSeverity.ERROR,
+      type: ThresholdType.Max,
+      severity: ThresholdSeverity.Error,
     };
   }
 }
 
-export function calculateSizes(budget: Budget, stats: webpack.Stats.ToJsonOutput): Size[] {
+function calculateSizes(budget: Budget, stats: webpack.Stats.ToJsonOutput): Size[] {
   const calculatorMap: Record<Budget['type'], { new(...args: any[]): Calculator }> = {
     all: AllCalculator,
     allScript: AllScriptCalculator,
@@ -116,7 +117,7 @@ export function calculateSizes(budget: Budget, stats: webpack.Stats.ToJsonOutput
   return calculator.calculate();
 }
 
-export abstract class Calculator {
+abstract class Calculator {
   constructor (
     protected budget: Budget,
     protected chunks: Exclude<webpack.Stats.ToJsonOutput['chunks'], undefined>,
@@ -252,7 +253,7 @@ class AnyCalculator extends Calculator {
 /**
  * Calculate the bytes given a string value.
  */
-export function calculateBytes(
+function calculateBytes(
   input: string,
   baseline?: string,
   factor: 1 | -1 = 1,
@@ -285,4 +286,45 @@ export function calculateBytes(
   }
 
   return baselineBytes + value * factor;
+}
+
+export function* checkBudgets(
+    budgets: Budget[], webpackStats: webpack.Stats.ToJsonOutput):
+    IterableIterator<{ severity: ThresholdSeverity, message: string }> {
+  for (const budget of budgets) {
+    const sizes = calculateSizes(budget, webpackStats);
+    for (const threshold of calculateThresholds(budget)) {
+      for (const {size, label} of sizes) {
+        switch (threshold.type) {
+          case ThresholdType.Max: {
+            if (size <= threshold.limit) {
+              continue;
+            }
+
+            const sizeDifference = formatSize(size - threshold.limit);
+            yield {
+              severity: threshold.severity,
+              message: `Exceeded maximum budget for ${label}. Budget ${
+                formatSize(threshold.limit)} was exceeded by ${
+                sizeDifference} with a total of ${formatSize(size)}.`,
+            };
+            break;
+          } case ThresholdType.Min: {
+            if (size >= threshold.limit) {
+              continue;
+            }
+
+            const sizeDifference = formatSize(threshold.limit - size);
+            yield {
+              severity: threshold.severity,
+              message: `Failed to meet minimum budget for ${label}. Budget ${
+                formatSize(threshold.limit)} was not met by ${
+                sizeDifference} with a total of ${formatSize(size)}.`,
+            };
+            break;
+          }
+        }
+      }
+    }
+  }
 }

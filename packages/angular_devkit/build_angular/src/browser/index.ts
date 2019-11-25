@@ -7,7 +7,7 @@
  */
 import { BuilderContext, BuilderOutput, createBuilder } from '@angular-devkit/architect';
 import { EmittedFiles, WebpackLoggingCallback, runWebpack } from '@angular-devkit/build-webpack';
-import { join, json, logging, normalize, tags, terminal, virtualFs } from '@angular-devkit/core';
+import { join, json, logging, normalize, tags, virtualFs } from '@angular-devkit/core';
 import { NodeJsSyncHost } from '@angular-devkit/core/node';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,7 +27,7 @@ import {
   getWorkerConfig,
   normalizeExtraEntryPoints,
 } from '../angular-cli-files/models/webpack-configs';
-import { ThresholdSeverity, calculateSizes, calculateThresholds, ThresholdType, Threshold } from '../angular-cli-files/utilities/bundle-calculator';
+import { ThresholdSeverity, checkBudgets } from '../angular-cli-files/utilities/bundle-calculator';
 import {
   IndexHtmlTransform,
   writeIndexHtml,
@@ -35,7 +35,6 @@ import {
 import { readTsconfig } from '../angular-cli-files/utilities/read-tsconfig';
 import { augmentAppWithServiceWorker } from '../angular-cli-files/utilities/service-worker';
 import {
-  formatSize,
   generateBuildStats,
   generateBundleStats,
   statsErrorsToString,
@@ -74,7 +73,6 @@ import {
 import { Schema as BrowserBuilderSchema } from './schema';
 
 const cacheDownlevelPath = cachingDisabled ? undefined : findCachePath('angular-build-dl');
-const {bold, red, yellow} = terminal;
 
 export type BrowserBuilderOutput = json.JsonObject &
   BuilderOutput & {
@@ -616,35 +614,10 @@ export function buildWebpackBrowser(
                 }
               }
 
+              // Check for budget errors and display them to the user.
               const budgets = options.budgets || [];
-              for (const budget of budgets) {
-                const sizes = calculateSizes(budget, webpackStats);
-                for (const threshold of calculateThresholds(budget)) {
-                  for (const {size, label} of sizes) {
-                    if (exceededThreshold(size, threshold)) {
-                      const colorize = colorizeSeverity(threshold.severity);
-                      const severity = stringifySeverity(threshold.severity);
-
-                      switch (threshold.type) {
-                        case ThresholdType.MAX: {
-                          const sizeDifference = formatSize(size - threshold.limit);
-                          bundleInfoText += bold(colorize(`\n${severity.toUpperCase()}:`
-                            + ` Exceeded maximum budget for ${label}. Budget ${
-                              formatSize(threshold.limit)} was exceeded by ${
-                              sizeDifference} with a total of ${formatSize(size)}.`));
-                          break;
-                        } case ThresholdType.MIN: {
-                          const sizeDifference = formatSize(threshold.limit - size);
-                          bundleInfoText += bold(colorize(`\n${severity.toUpperCase()}:`
-                            + ` Failed to meet minimum budget for ${label}. Budget ${
-                              formatSize(threshold.limit)} was not met by ${
-                              sizeDifference} with a total of ${formatSize(size)}.`));
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
+              for (const {severity, message} of checkBudgets(budgets, webpackStats)) {
+                bundleInfoText += `\n${stringifySeverity(severity)}: ${message}`;
               }
 
               bundleInfoText +=
@@ -778,22 +751,8 @@ function mapErrorToMessage(error: unknown): string | undefined {
 
 function stringifySeverity(severity: ThresholdSeverity): string {
   switch (severity) {
-    case ThresholdSeverity.WARNING: return 'Warning';
-    case ThresholdSeverity.ERROR: return 'Error';
-  }
-}
-
-function colorizeSeverity(severity: ThresholdSeverity): (text: string) => string {
-  switch (severity) {
-    case ThresholdSeverity.WARNING: return yellow;
-    case ThresholdSeverity.ERROR: return red;
-  }
-}
-
-function exceededThreshold(size: number, threshold: Threshold): boolean {
-  switch (threshold.type) {
-    case ThresholdType.MAX: return size > threshold.limit;
-    case ThresholdType.MIN: return size < threshold.limit;
+    case ThresholdSeverity.Warning: return 'WARNING';
+    case ThresholdSeverity.Error: return 'ERROR';
   }
 }
 

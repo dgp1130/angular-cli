@@ -5,140 +5,304 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
-import { calculateBytes, calculateThresholds, ThresholdType, ThresholdSeverity } from './bundle-calculator';
-import { Type } from '../../browser/schema';
+import { ThresholdSeverity, checkBudgets } from './bundle-calculator';
+import { Type, Budget } from '../../browser/schema';
+import webpack = require('webpack');
+
+const KB = 1024;
 
 describe('bundle-calculator', () => {
-  describe('calculateThresholds()', () => {
-    it('yields thresholds from the given budget', () => {
-      const thresholds = Array.from(calculateThresholds({
-        baseline: '1Mb',
+  describe('checkBudgets()', () => {
+    it('yields maximum budgets exceeded', () => {
+      const budgets: Budget[] = [{
+        type: Type.Any,
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 1.5 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.5 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for foo.js.'),
+      });
+    });
+
+    it('yields minimum budgets exceeded', () => {
+      const budgets: Budget[] = [{
+        type: Type.Any,
+        minimumError: '1kb',
+      }];
+      const stats = {
+        chunks: [],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 1.5 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.5 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Failed to meet minimum budget for bar.js.'),
+      });
+    });
+
+    it('yields exceeded bundle budgets', () => {
+      const budgets: Budget[] = [{
+        type: Type.Bundle,
+        name: 'foo',
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            names: [ 'foo' ],
+            files: [ 'foo.js', 'bar.js' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 0.75 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.75 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for foo.'),
+      });
+    });
+
+    it('yields exceeded initial budget', () => {
+      const budgets: Budget[] = [{
+        type: Type.Initial,
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            initial: true,
+            files: [ 'foo.js', 'bar.js' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 0.75 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.75 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for initial.'),
+      });
+    });
+
+    it('yields exceeded total scripts budget', () => {
+      const budgets: Budget[] = [{
+        type: Type.AllScript,
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            initial: true,
+            files: [ 'foo.js', 'bar.js' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 0.75 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.75 * KB,
+          },
+          {
+            name: 'baz.css',
+            size: 1.5 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for total scripts.'),
+      });
+    });
+
+    it('yields exceeded total budget', () => {
+      const budgets: Budget[] = [{
         type: Type.All,
-        maximumWarning: '0.1Mb',
-        maximumError: '0.2Mb',
-        minimumWarning: '0.1Mb',
-        minimumError: '0.2Mb',
-        warning: '0.3Mb',
-        error: '0.4Mb',
-      }));
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            initial: true,
+            files: [ 'foo.js', 'bar.css' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 0.75 * KB,
+          },
+          {
+            name: 'bar.css',
+            size: 0.75 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
 
-      const MB = 1024 * 1024;
-      expect(thresholds).toContain({
-        limit: 1.1 * MB,
-        type: ThresholdType.MAX,
-        severity: ThresholdSeverity.WARNING,
-      });
-      expect(thresholds).toContain({
-        limit: 1.2 * MB,
-        type: ThresholdType.MAX,
-        severity: ThresholdSeverity.ERROR,
-      });
-      expect(thresholds).toContain({
-        limit: 0.9 * MB,
-        type: ThresholdType.MIN,
-        severity: ThresholdSeverity.WARNING,
-      });
-      expect(thresholds).toContain({
-        limit: 0.8 * MB,
-        type: ThresholdType.MIN,
-        severity: ThresholdSeverity.ERROR,
-      });
-      expect(thresholds).toContain({
-        limit: 1.3 * MB,
-        type: ThresholdType.MAX,
-        severity: ThresholdSeverity.WARNING,
-      });
-      expect(thresholds).toContain({
-        limit: 0.7 * MB,
-        type: ThresholdType.MIN,
-        severity: ThresholdSeverity.WARNING,
-      });
-      expect(thresholds).toContain({
-        limit: 1.4 * MB,
-        type: ThresholdType.MAX,
-        severity: ThresholdSeverity.ERROR,
-      });
-      expect(thresholds).toContain({
-        limit: 0.6 * MB,
-        type: ThresholdType.MIN,
-        severity: ThresholdSeverity.ERROR,
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for total.'),
       });
     });
-  });
 
-  describe('calculateBytes()', () => {
-    it('converts an integer with no postfix', () => {
-      expect(calculateBytes('0')).toBe(0);
-      expect(calculateBytes('5')).toBe(5);
-      expect(calculateBytes('190')).toBe(190);
-      expect(calculateBytes('92')).toBe(92);
+    it('yields exceeded component style budgets', () => {
+      const budgets: Budget[] = [{
+        type: Type.AnyComponentStyle,
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            initial: true,
+            files: [ 'foo.css', 'bar.js' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.css',
+            size: 1.5 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.5 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for foo.css.'),
+      });
     });
 
-    it('converts a decimal with no postfix', () => {
-      expect(calculateBytes('3.14')).toBe(3.14);
-      expect(calculateBytes('0.25')).toBe(0.25);
-      expect(calculateBytes('90.5')).toBe(90.5);
-      expect(calculateBytes('25.0')).toBe(25);
+    it('yields exceeded individual script budget', () => {
+      const budgets: Budget[] = [{
+        type: Type.AnyScript,
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            initial: true,
+            files: [ 'foo.js', 'bar.js' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.js',
+            size: 1.5 * KB,
+          },
+          {
+            name: 'bar.js',
+            size: 0.5 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
+
+      const failures = Array.from(checkBudgets(budgets, stats));
+
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for foo.js.'),
+      });
     });
 
-    it('converts an integer with kb postfix', () => {
-      expect(calculateBytes('0kb')).toBe(0);
-      expect(calculateBytes('5kb')).toBe(5 * 1024);
-      expect(calculateBytes('190KB')).toBe(190 * 1024);
-      expect(calculateBytes('92Kb')).toBe(92 * 1024);
-      expect(calculateBytes('25kB')).toBe(25 * 1024);
-    });
+    it('yields exceeded individual file budget', () => {
+      const budgets: Budget[] = [{
+        type: Type.Any,
+        maximumError: '1kb',
+      }];
+      const stats = {
+        chunks: [
+          {
+            initial: true,
+            files: [ 'foo.ext', 'bar.ext' ],
+          },
+        ],
+        assets: [
+          {
+            name: 'foo.ext',
+            size: 1.5 * KB,
+          },
+          {
+            name: 'bar.ext',
+            size: 0.5 * KB,
+          },
+        ],
+      } as unknown as webpack.Stats.ToJsonOutput;
 
-    it('converts a decimal with kb postfix', () => {
-      expect(calculateBytes('3.14kb')).toBe(3.14 * 1024);
-      expect(calculateBytes('0.25KB')).toBe(0.25 * 1024);
-      expect(calculateBytes('90.5Kb')).toBe(90.5 * 1024);
-      expect(calculateBytes('25.0kB')).toBe(25 * 1024);
-    });
+      const failures = Array.from(checkBudgets(budgets, stats));
 
-    it('converts an integer with mb postfix', () => {
-      expect(calculateBytes('0mb')).toBe(0);
-      expect(calculateBytes('5mb')).toBe(5 * 1024 * 1024);
-      expect(calculateBytes('190MB')).toBe(190 * 1024 * 1024);
-      expect(calculateBytes('92Mb')).toBe(92 * 1024 * 1024);
-      expect(calculateBytes('25mB')).toBe(25 * 1024 * 1024);
-    });
-
-    it('converts a decimal with mb postfix', () => {
-      expect(calculateBytes('3.14mb')).toBe(3.14 * 1024 * 1024);
-      expect(calculateBytes('0.25MB')).toBe(0.25 * 1024 * 1024);
-      expect(calculateBytes('90.5Mb')).toBe(90.5 * 1024 * 1024);
-      expect(calculateBytes('25.0mB')).toBe(25 * 1024 * 1024);
-    });
-
-    it('converts an integer with gb postfix', () => {
-      expect(calculateBytes('0gb')).toBe(0);
-      expect(calculateBytes('5gb')).toBe(5 * 1024 * 1024 * 1024);
-      expect(calculateBytes('190GB')).toBe(190 * 1024 * 1024 * 1024);
-      expect(calculateBytes('92Gb')).toBe(92 * 1024 * 1024 * 1024);
-      expect(calculateBytes('25gB')).toBe(25 * 1024 * 1024 * 1024);
-    });
-
-    it('converts a decimal with gb postfix', () => {
-      expect(calculateBytes('3.14gb')).toBe(3.14 * 1024 * 1024 * 1024);
-      expect(calculateBytes('0.25GB')).toBe(0.25 * 1024 * 1024 * 1024);
-      expect(calculateBytes('90.5Gb')).toBe(90.5 * 1024 * 1024 * 1024);
-      expect(calculateBytes('25.0gB')).toBe(25 * 1024 * 1024 * 1024);
-    });
-
-    it ('converts a decimal with mb and baseline', () => {
-      expect(calculateBytes('3mb', '5mb', -1)).toBe(2 * 1024 * 1024);
-    });
-
-    it ('converts a percentage with baseline', () => {
-      expect(calculateBytes('20%', '1mb')).toBe(1024 * 1024 * 1.2);
-      expect(calculateBytes('20%', '1mb', -1)).toBe(1024 * 1024 * 0.8);
-    });
-
-    it ('supports whitespace', () => {
-      expect(calculateBytes(' 5kb ')).toBe(5 * 1024);
-      expect(calculateBytes('0.25 MB')).toBe(0.25 * 1024 * 1024);
-      expect(calculateBytes(' 20 % ', ' 1 mb ')).toBe(1024 * 1024 * 1.2);
+      expect(failures.length).toBe(1);
+      expect(failures).toContain({
+        severity: ThresholdSeverity.Error,
+        message: jasmine.stringMatching('Exceeded maximum budget for foo.ext.'),
+      });
     });
   });
 });

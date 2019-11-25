@@ -30,6 +30,7 @@ import { AssetPatternClass, ExtraEntryPoint } from '../../../browser/schema';
 import { BuildBrowserFeatures } from '../../../utils';
 import { findCachePath } from '../../../utils/cache-path';
 import { cachingDisabled, manglingDisabled } from '../../../utils/environment-options';
+import { BundleBudgetPlugin } from '../../plugins/bundle-budget';
 import { CleanCssWebpackPlugin } from '../../plugins/cleancss-webpack-plugin';
 import { NamedLazyChunksPlugin } from '../../plugins/named-chunks-plugin';
 import { ScriptsWebpackPlugin } from '../../plugins/scripts-webpack-plugin';
@@ -553,7 +554,13 @@ export function getCommonConfig(wco: WebpackConfigOptions): Configuration {
       minimizer: [
         new HashedModuleIdsPlugin(),
         ...extraMinimizers,
-      ],
+      ].concat(differentialLoadingMode ? [
+        // Budgets are computed after differential builds, not via a plugin.
+        // https://github.com/angular/angular-cli/blob/master/packages/angular_devkit/build_angular/src/browser/index.ts
+      ] : [
+        // Non differential builds should be computed here, as a plugin.
+        new BundleBudgetPlugin({ budgets: buildOptions.budgets }),
+      ]),
     },
     plugins: [
       // Always replace the context for the System.import in angular/core to prevent warnings.
