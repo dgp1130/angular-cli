@@ -641,12 +641,13 @@ export function buildWebpackBrowser(
               const budgets = options.budgets || [];
               const budgetFailures = checkBudgets(budgets, webpackStats, processResults);
               for (const {severity, message} of budgetFailures) {
+                const msg = `budgets: ${message}`;
                 switch (severity) {
                   case ThresholdSeverity.Warning:
-                    webpackStats.warnings.push(message);
+                    webpackStats.warnings.push(msg);
                     break;
                   case ThresholdSeverity.Error:
-                    webpackStats.errors.push(message);
+                    webpackStats.errors.push(msg);
                     break;
                   default:
                     assertNever(severity);
