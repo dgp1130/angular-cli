@@ -614,12 +614,6 @@ export function buildWebpackBrowser(
                 }
               }
 
-              // Check for budget errors and display them to the user.
-              const budgets = options.budgets || [];
-              for (const {severity, message} of checkBudgets(budgets, webpackStats)) {
-                bundleInfoText += `\n${stringifySeverity(severity)}: ${message}`;
-              }
-
               bundleInfoText +=
                 '\n' +
                 generateBuildStats(
@@ -628,6 +622,23 @@ export function buildWebpackBrowser(
                   true,
                 );
               context.logger.info(bundleInfoText);
+
+              // Check for budget errors and display them to the user.
+              const budgets = options.budgets || [];
+              for (const {severity, message} of checkBudgets(budgets, webpackStats)) {
+                switch (severity) {
+                  case ThresholdSeverity.Warning:
+                    webpackStats.warnings.push(message);
+                    break;
+                  case ThresholdSeverity.Error:
+                    webpackStats.errors.push(message);
+                    break;
+                  default:
+                    assertNever(severity);
+                    break;
+                }
+              }
+
               if (webpackStats && webpackStats.warnings.length > 0) {
                 context.logger.warn(statsWarningsToString(webpackStats, { colors: true }));
               }
@@ -749,11 +760,9 @@ function mapErrorToMessage(error: unknown): string | undefined {
   return undefined;
 }
 
-function stringifySeverity(severity: ThresholdSeverity): string {
-  switch (severity) {
-    case ThresholdSeverity.Warning: return 'WARNING';
-    case ThresholdSeverity.Error: return 'ERROR';
-  }
+function assertNever(input: never): never {
+  throw new Error(`Unexpected call to assertNever() with input: ${
+      JSON.stringify(input, null /* replacer */, 4 /* tabSize */)}`);
 }
 
 export default createBuilder<json.JsonObject & BrowserBuilderSchema>(buildWebpackBrowser);
