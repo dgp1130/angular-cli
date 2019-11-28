@@ -593,25 +593,30 @@ export function buildWebpackBrowser(
               }
 
               let bundleInfoText = '';
-              if (webpackStats && webpackStats.chunks) {
-                for (const chunk of webpackStats.chunks) {
-                  const result = processResults.find((result) => result.name === chunk.id.toString());
-                  if (result) {
-                    if (result.original) {
-                      bundleInfoText +=
-                        '\n' + generateBundleInfoStats(result.name, result.original, chunk);
-                    }
-                    if (result.downlevel) {
-                      bundleInfoText +=
-                        '\n' + generateBundleInfoStats(result.name, result.downlevel, chunk);
-                    }
-                  } else {
-                    const asset =
-                    webpackStats.assets && webpackStats.assets.find(a => a.name === chunk.files[0]);
-                    bundleInfoText +=
-                      '\n' + generateBundleStats({ ...chunk, size: asset && asset.size }, true);
-                  }
+              for (const result of processResults) {
+                const chunk = webpackStats.chunks
+                    && webpackStats.chunks.find((chunk) => chunk.id.toString() === result.name);
+
+                if (result.original) {
+                  bundleInfoText +=
+                    '\n' + generateBundleInfoStats(result.name, result.original, chunk);
                 }
+
+                if (result.downlevel) {
+                  bundleInfoText +=
+                    '\n' + generateBundleInfoStats(result.name, result.downlevel, chunk);
+                }
+              }
+
+              const unprocessedChunks = webpackStats.chunks && webpackStats.chunks
+                  .filter((chunk) => !processResults
+                      .find((result) => chunk.id.toString() === result.name),
+                  ) || [];
+              for (const chunk of unprocessedChunks) {
+                const asset =
+                    webpackStats.assets && webpackStats.assets.find(a => a.name === chunk.files[0]);
+                bundleInfoText +=
+                  '\n' + generateBundleStats({ ...chunk, size: asset && asset.size }, true);
               }
 
               bundleInfoText +=
@@ -644,6 +649,7 @@ export function buildWebpackBrowser(
               }
               if (webpackStats && webpackStats.errors.length > 0) {
                 context.logger.error(statsErrorsToString(webpackStats, { colors: true }));
+                return { success: false };
               }
             } else {
               files = emittedFiles.filter(x => x.name !== 'polyfills-es5');
