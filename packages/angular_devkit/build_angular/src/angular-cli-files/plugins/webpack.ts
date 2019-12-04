@@ -19,5 +19,6 @@ export {
 } from './postcss-cli-resources';
 
 import { join } from 'path';
+export const AnyComponentStyleBudgetChecker = require.resolve(join(__dirname, 'any-component-style-budget-checker'));
 export const RawCssLoader = require.resolve(join(__dirname, 'raw-css-loader'));
 export const WebpackRollupLoader = require.resolve(join(__dirname, 'webpack-rollup-loader'));

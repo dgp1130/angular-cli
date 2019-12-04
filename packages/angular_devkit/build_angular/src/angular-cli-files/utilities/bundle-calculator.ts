@@ -36,7 +36,7 @@ enum DifferentialBuildType {
   DOWNLEVEL = 'es5',
 }
 
-function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
+export function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
   if (budget.maximumWarning) {
     yield {
       limit: calculateBytes(budget.maximumWarning, budget.baseline, 1),
@@ -262,6 +262,7 @@ class AllCalculator extends Calculator {
 
 /**
  * Any components styles
+ * TODO: Delete.
  */
 class AnyComponentStyleCalculator extends Calculator {
   calculate() {
@@ -347,40 +348,48 @@ export function* checkBudgets(
 ): IterableIterator<{ severity: ThresholdSeverity, message: string }> {
   for (const budget of budgets) {
     const sizes = calculateSizes(budget, webpackStats, processResults);
-    for (const threshold of calculateThresholds(budget)) {
-      for (const {size, label} of sizes) {
-        switch (threshold.type) {
-          case ThresholdType.Max: {
-            if (size <= threshold.limit) {
-              continue;
-            }
+    for (const {size, label} of sizes) {
+      yield* checkThresholds(calculateThresholds(budget), size, label || 'Unknown');
+    }
+  }
+}
 
-            const sizeDifference = formatSize(size - threshold.limit);
-            yield {
-              severity: threshold.severity,
-              message: `Exceeded maximum budget for ${label}. Budget ${
-                formatSize(threshold.limit)} was exceeded by ${
-                sizeDifference} with a total of ${formatSize(size)}.`,
-            };
-            break;
-          } case ThresholdType.Min: {
-            if (size >= threshold.limit) {
-              continue;
-            }
-
-            const sizeDifference = formatSize(threshold.limit - size);
-            yield {
-              severity: threshold.severity,
-              message: `Failed to meet minimum budget for ${label}. Budget ${
-                formatSize(threshold.limit)} was not met by ${
-                sizeDifference} with a total of ${formatSize(size)}.`,
-            };
-            break;
-          } default: {
-            assertNever(threshold.type);
-            break;
-          }
+export function* checkThresholds(
+  thresholds: IterableIterator<Threshold>,
+  size: number,
+  label: string,
+): IterableIterator<{ severity: ThresholdSeverity, message: string }> {
+  for (const threshold of thresholds) {
+    switch (threshold.type) {
+      case ThresholdType.Max: {
+        if (size <= threshold.limit) {
+          continue;
         }
+
+        const sizeDifference = formatSize(size - threshold.limit);
+        yield {
+          severity: threshold.severity,
+          message: `Exceeded maximum budget for ${label}. Budget ${
+            formatSize(threshold.limit)} was exceeded by ${
+            sizeDifference} with a total of ${formatSize(size)}.`,
+        };
+        break;
+      } case ThresholdType.Min: {
+        if (size >= threshold.limit) {
+          continue;
+        }
+
+        const sizeDifference = formatSize(threshold.limit - size);
+        yield {
+          severity: threshold.severity,
+          message: `Failed to meet minimum budget for ${label}. Budget ${
+            formatSize(threshold.limit)} was not met by ${
+            sizeDifference} with a total of ${formatSize(size)}.`,
+        };
+        break;
+      } default: {
+        assertNever(threshold.type);
+        break;
       }
     }
   }

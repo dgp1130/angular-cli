@@ -268,6 +268,7 @@ export function buildWebpackBrowser(
         // tslint:disable-next-line: no-big-function
         concatMap(async buildEvent => {
           const { webpackStats: webpackRawStats, success, emittedFiles = [] } = buildEvent;
+          debugger; // DEBUG
           if (!webpackRawStats) {
             throw new Error('Webpack stats build result is required.');
           }

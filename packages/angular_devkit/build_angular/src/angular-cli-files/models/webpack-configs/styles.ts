@@ -9,6 +9,7 @@
 import * as path from 'path';
 import * as webpack from 'webpack';
 import {
+  AnyComponentStyleBudgetChecker,
   PostcssCliResources,
   RawCssLoader,
   RemoveHashPlugin,
@@ -171,6 +172,12 @@ export function getStylesConfig(wco: WebpackConfigOptions) {
     test,
     use: [
       { loader: require.resolve('raw-loader') },
+      {
+        loader: AnyComponentStyleBudgetChecker,
+        options: {
+          budgets: buildOptions.budgets,
+        },
+      },
       {
         loader: require.resolve('postcss-loader'),
         options: {
