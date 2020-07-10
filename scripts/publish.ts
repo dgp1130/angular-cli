@@ -17,6 +17,7 @@ export interface PublishArgs {
   tag?: string;
   branchCheck?: boolean;
   versionCheck?: boolean;
+  tagCheck?: boolean;
   registry?: string;
 }
 
@@ -89,13 +90,48 @@ function _versionCheck(args: PublishArgs, logger: logging.Logger) {
   });
 }
 
+/** Returns whether or not the given tag is valid to be used. */
+function _tagCheck(tag: string) {
+  if (tag === 'latest') {
+    return; // Valid
+  }
+  if (tag === 'next') {
+    return; // Valid
+  }
+  if (/v\d+-lts/.test(tag)) {
+    return; // Valid
+  }
+
+  throw new Error(
+      '--tag should be "latest", "next", or "vX-lts". Use `--tagCheck false` to'
+      + 'skip this check.');
+}
+
 export default async function (args: PublishArgs, logger: logging.Logger) {
-  if (args.branchCheck === undefined || args.branchCheck === true) {
+  const {
+    tag,
+    tagCheck,
+    branchCheck,
+    versionCheck,
+    registry: registryArg,
+  } = args;
+
+  // Validate arguments.
+  if (!tag) {
+    throw new Error('--tag is required.');
+  }
+  if (tagCheck ?? true) {
+    _tagCheck(tag);
+  }
+  if (branchCheck ?? true) {
     _branchCheck(args, logger);
   }
-  if (args.versionCheck === undefined || args.versionCheck === true) {
+  if (versionCheck ?? true) {
     _versionCheck(args, logger);
   }
+
+  // If no registry is provided, the wombat proxy should be used.
+  const registry = registryArg ?? wombat;
 
   logger.info('Building...');
   await build({}, logger.createChild('build'));
@@ -112,17 +148,12 @@ export default async function (args: PublishArgs, logger: logging.Logger) {
       .then(() => {
         logger.info(name);
 
-        const publishArgs = ['publish'];
-        if (args.tag) {
-          publishArgs.push('--tag', args.tag);
-        }
+        const publishArgs = [ 'publish', '--tag', tag, '--registry', registry ];
 
-        // If no registry is provided, the wombat proxy should be used.
-        publishArgs.push('--registry', args.registry ?? wombat);
-
-        return _exec('npm', publishArgs, {
-          cwd: pkg.dist,
-        }, logger);
+        return Promise.resolve(`npm ${publishArgs.join(' ')}`); // DEBUG
+        // return _exec('npm', publishArgs, {
+        //   cwd: pkg.dist,
+        // }, logger);
       })
       .then((stdout: string) => {
         logger.info(stdout);
