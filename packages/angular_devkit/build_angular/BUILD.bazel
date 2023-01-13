@@ -78,6 +78,11 @@ ts_json_schema(
     src = "src/builders/prerender/schema.json",
 )
 
+ts_json_schema(
+    name = "wtr_schema",
+    src = "src/builders/wtr/schema.json",
+)
+
 ts_library(
     name = "build_angular",
     package_name = "@angular-devkit/build-angular",
@@ -107,6 +112,7 @@ ts_library(
         "//packages/angular_devkit/build_angular:src/builders/protractor/schema.ts",
         "//packages/angular_devkit/build_angular:src/builders/server/schema.ts",
         "//packages/angular_devkit/build_angular:src/builders/ssr-dev-server/schema.ts",
+        "//packages/angular_devkit/build_angular:src/builders/wtr/schema.ts",
     ],
     data = glob(
         include = [
@@ -155,6 +161,8 @@ ts_library(
         "@npm//@types/semver",
         "@npm//@types/text-table",
         "@npm//@vitejs/plugin-basic-ssl",
+        "@npm//@web/dev-server-esbuild",
+        "@npm//@web/test-runner",
         "@npm//ajv",
         "@npm//ansi-colors",
         "@npm//autoprefixer",

@@ -4,6 +4,10 @@
   "description": "Browser target options",
   "type": "object",
   "properties": {
+    "entryPoints": {
+      "type": "array",
+      "description": "Entry points"
+    },
     "assets": {
       "type": "array",
       "description": "List of static application assets.",

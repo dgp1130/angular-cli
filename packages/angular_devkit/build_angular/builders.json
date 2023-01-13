@@ -41,6 +41,11 @@
       "schema": "./src/builders/karma/schema.json",
       "description": "Run Karma unit tests."
     },
+    "wtr": {
+      "implementation": "./src/builders/wtr",
+      "schema": "./src/builders/wtr/schema.json",
+      "description": "Run unit tests with Web Test Runner."
+    },
     "protractor": {
       "implementation": "./src/builders/protractor",
       "schema": "./src/builders/protractor/schema.json",
