@@ -10,6 +10,7 @@ import {
   TestRunnerCoreConfig,
   defaultReporter,
 } from '@web/test-runner';
+import { promises as fs } from 'fs';
 import { Glob } from 'glob';
 import path from 'path';
 import { Schema } from './schema';
@@ -46,8 +47,11 @@ async function build(
   outputDir: string,
 ): Promise<BuilderOutput> {
   const target = targetFromTargetString(options.browserTarget!);
-  return await scheduleTargetAndForget(ctx, target, {
-    entryPoints: testFiles,
+  const esBuildOutput = await scheduleTargetAndForget(ctx, target, {
+    entryPoints: testFiles.concat([
+      'node_modules/@angular/core/fesm2020/testing.mjs',
+      'node_modules/@angular/platform-browser-dynamic/fesm2020/testing.mjs',
+    ]),
     tsConfig: options.tsConfig,
     outputPath: outputDir,
     outputHashing: 'none',
@@ -62,16 +66,55 @@ async function build(
     },
     polyfills: ['./src/polyfills.ts'], // TODO: How to load `zone.js` *and* `zone.js/testing`?
   }).toPromise();
+  if (!esBuildOutput.success) return esBuildOutput;
+
+  return await copyTemplatesAndStyles(`${ctx.workspaceRoot}/src`, outputDir);
+}
+
+async function copyTemplatesAndStyles(srcRoot: string, outDir: string): Promise<BuilderOutput> {
+  const matches = await new Promise<string[]>((resolve, reject) => {
+    new Glob('**/*.component.{html,css}', { cwd: srcRoot }, (err, matches) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(matches);
+      }
+    });
+  });
+
+  // TODO: Maintain directory structure.
+  // TODO: Add transform to inline templates and styles: https://github.com/angular/angular-cli/blob/main/packages/ngtools/webpack/src/transformers/replace_resources.ts
+  try {
+    await Promise.all(
+      matches.map((match) =>
+        fs.copyFile(path.join(srcRoot, match), path.join(outDir, path.parse(match).base)),
+      ),
+    );
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to copy template or style:\n${(err as Error).message}`,
+    };
+  }
+
+  return { success: true };
 }
 
 async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
   const config: TestRunnerCoreConfig = {
     rootDir: wkspRoot,
-    files: [`${testDir}/**/*.js`, `!${testDir}/polyfills.js`, `!${testDir}/chunk-*.js`],
+    files: [
+      `${testDir}/**/*.js`,
+      `!${testDir}/polyfills.js`,
+      `!${testDir}/chunk-*.js`,
+      `!${testDir}/angular_core_testing.js`,
+      `!${testDir}/angular_platform_browser_dynamic_testing.js`,
+    ],
     testFramework: {
       config: {
         defaultTimeoutInterval: 5_000,
       },
+      // TODO: Build as a separate entry point and use that here.
       path: path.join(__dirname, 'test_framework.mjs'),
     },
     concurrentBrowsers: 1,
@@ -96,6 +139,7 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
   <head>
     <meta charset="utf8">
     <title>Unit tests</title>
+    <base href="${testDir}/">
     <script src="/node_modules/jasmine-core/lib/jasmine-core/jasmine.js"></script>
     <script>
       // Run first so Zone.js testing can find global Jasmine?
@@ -107,7 +151,7 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
       Object.assign(window, jasmineRequire.interface(jasmine, env));
       window.onload = function () {};
     </script>
-    <script src="dist/test-out/polyfills.js" type="module"></script>
+    <script src="polyfills.js" type="module"></script>
     <script src="${testRunnerImport}" type="module"></script>
   </head>
   <body></body>

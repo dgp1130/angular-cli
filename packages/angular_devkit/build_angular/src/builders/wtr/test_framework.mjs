@@ -7,6 +7,10 @@
 // TODO: Why isn't this getting transpiled?
 import { getConfig, sessionStarted, sessionFinished, sessionFailed } from '/node_modules/@web/test-runner-core/browser/session.js';
 
+// TODO: How to import this properly?
+import { getTestBed } from '/dist/test-out/angular_core_testing.js';
+import { BrowserDynamicTestingModule, platformBrowserDynamicTesting } from '/dist/test-out/angular_platform_browser_dynamic_testing.js';
+
 const failedSpecs = [];
 const allSpecs = [];
 const failedImports = [];
@@ -57,6 +61,11 @@ const { testFile, testFrameworkConfig } = await getConfig();
 const config = { defaultTimeoutInterval: 60000, ...(testFrameworkConfig ?? {}) };
 
 jasmine.DEFAULT_TIMEOUT_INTERVAL = config.defaultTimeoutInterval;
+
+getTestBed().initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting(), {
+  errorOnUnknownElements: true,
+  errorOnUnknownProperties: true
+});
 
 // load the test file as an es module
 await import(new URL(testFile, document.baseURI).href).catch(error => {
