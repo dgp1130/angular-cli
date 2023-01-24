@@ -4,77 +4,80 @@
  * Forked from https://github.com/blueprintui/web-test-runner-jasmine/blob/d07dad01e9e287ea96c41c433c6f787f6170566a/src/index.ts.
  */
 
-// TODO: Why isn't this getting transpiled?
+// Can't import and bundle `@web/test-runner-core` directly because it contains an import of
+// `/__web-dev-server__web-socket.js`, so we have to mark this dependency as "external" and let it
+// resolve at runtime.
 import { getConfig, sessionStarted, sessionFinished, sessionFailed } from '/node_modules/@web/test-runner-core/browser/session.js';
 
-// TODO: How to import this properly?
-import { getTestBed } from '/dist/test-out/angular_core_testing.js';
-import { BrowserDynamicTestingModule, platformBrowserDynamicTesting } from '/dist/test-out/angular_platform_browser_dynamic_testing.js';
+import { getTestBed } from '@angular/core/testing';
+import { BrowserDynamicTestingModule, platformBrowserDynamicTesting } from '@angular/platform-browser-dynamic/testing';
 
-const failedSpecs = [];
-const allSpecs = [];
-const failedImports = [];
+(async () => {
+  const failedSpecs = [];
+  const allSpecs = [];
+  const failedImports = [];
 
-env.addReporter({
-  jasmineStarted: () => {},
-  suiteStarted: () => {},
-  specStarted: () => {},
-  suiteDone: () => {},
-  specDone: result => {
-    [...result.passedExpectations, ...result.failedExpectations].forEach(e => {
-      allSpecs.push({
-        name: e.description,
-        passed: e.passed,
-      });
-    });
-
-    if (result.status !== 'passed' || result.status !== 'incomplete') {
-      result.failedExpectations.forEach(e => {
-        const message = result.description + '\n' + e.message + ': ' + e.stack;
-        console.error(message);
-        failedSpecs.push({
-          message,
+  env.addReporter({
+    jasmineStarted: () => {},
+    suiteStarted: () => {},
+    specStarted: () => {},
+    suiteDone: () => {},
+    specDone: result => {
+      [...result.passedExpectations, ...result.failedExpectations].forEach(e => {
+        allSpecs.push({
           name: e.description,
-          stack: e.stack,
-          expected: e.expected,
-          actual: e.actual,
+          passed: e.passed,
         });
       });
-    }
-  },
-  jasmineDone: result => {
-    console.log(`Tests ${result.overallStatus}`);
-    sessionFinished({
-      passed: result.overallStatus === 'passed',
-      errors: [...failedSpecs, ...failedImports],
-      testResults: {
-        name: '',
-        suites: [],
-        tests: allSpecs,
-      },
-    });
-  },
-});
 
-sessionStarted();
-const { testFile, testFrameworkConfig } = await getConfig();
-const config = { defaultTimeoutInterval: 60000, ...(testFrameworkConfig ?? {}) };
+      if (result.status !== 'passed' || result.status !== 'incomplete') {
+        result.failedExpectations.forEach(e => {
+          const message = result.description + '\n' + e.message + ': ' + e.stack;
+          console.error(message);
+          failedSpecs.push({
+            message,
+            name: e.description,
+            stack: e.stack,
+            expected: e.expected,
+            actual: e.actual,
+          });
+        });
+      }
+    },
+    jasmineDone: result => {
+      console.log(`Tests ${result.overallStatus}`);
+      sessionFinished({
+        passed: result.overallStatus === 'passed',
+        errors: [...failedSpecs, ...failedImports],
+        testResults: {
+          name: '',
+          suites: [],
+          tests: allSpecs,
+        },
+      });
+    },
+  });
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = config.defaultTimeoutInterval;
+  sessionStarted();
+  const { testFile, testFrameworkConfig } = await getConfig();
+  const config = { defaultTimeoutInterval: 60000, ...(testFrameworkConfig ?? {}) };
 
-getTestBed().initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting(), {
-  errorOnUnknownElements: true,
-  errorOnUnknownProperties: true
-});
+  jasmine.DEFAULT_TIMEOUT_INTERVAL = config.defaultTimeoutInterval;
 
-// load the test file as an es module
-await import(new URL(testFile, document.baseURI).href).catch(error => {
-  failedImports.push({ file: testFile, error: { message: error.message, stack: error.stack } });
-});
+  getTestBed().initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting(), {
+    errorOnUnknownElements: true,
+    errorOnUnknownProperties: true
+  });
 
-try {
-  env.execute();
-} catch (error) {
-  console.error(error);
-  sessionFailed(error);
-}
+  // load the test file as an es module
+  await import(new URL(testFile, document.baseURI).href).catch(error => {
+    failedImports.push({ file: testFile, error: { message: error.message, stack: error.stack } });
+  });
+
+  try {
+    env.execute();
+  } catch (error) {
+    console.error(error);
+    sessionFailed(error);
+  }
+})();

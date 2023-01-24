@@ -47,11 +47,9 @@ async function build(
   outputDir: string,
 ): Promise<BuilderOutput> {
   const target = targetFromTargetString(options.browserTarget!);
+  const testFramework = path.relative(process.cwd(), path.join(__dirname, 'test_framework.mjs'));
   const esBuildOutput = await scheduleTargetAndForget(ctx, target, {
-    entryPoints: testFiles.concat([
-      'node_modules/@angular/core/fesm2020/testing.mjs',
-      'node_modules/@angular/platform-browser-dynamic/fesm2020/testing.mjs',
-    ]),
+    entryPoints: testFiles.concat([testFramework]),
     tsConfig: options.tsConfig,
     outputPath: outputDir,
     outputHashing: 'none',
@@ -59,6 +57,7 @@ async function build(
     commonChunk: false,
     optimization: false,
     buildOptimizer: false,
+    externalDependencies: ['/node_modules/@web/test-runner-core/browser/session.js'],
     sourceMap: {
       scripts: true,
       styles: true,
@@ -107,15 +106,13 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
       `${testDir}/**/*.js`,
       `!${testDir}/polyfills.js`,
       `!${testDir}/chunk-*.js`,
-      `!${testDir}/angular_core_testing.js`,
-      `!${testDir}/angular_platform_browser_dynamic_testing.js`,
+      `!${testDir}/test_framework.mjs.js`,
     ],
     testFramework: {
       config: {
         defaultTimeoutInterval: 5_000,
       },
-      // TODO: Build as a separate entry point and use that here.
-      path: path.join(__dirname, 'test_framework.mjs'),
+      path: `${testDir}/test_framework.mjs.js`,
     },
     concurrentBrowsers: 1,
     concurrency: 1,
@@ -132,7 +129,10 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
     testsStartTimeout: 5_000,
     testsFinishTimeout: 5_000,
     manual: true, // DEBUG
-    testRunnerHtml(testRunnerImport, config) {
+    testRunnerHtml(_testRunnerImport, _config) {
+      // Don't use `_testRunnerImport` because it gets resolved to an `/__web-test-runner__/...`
+      // path which duplicates its chunked dependencies. Instead, we need to directly reference the
+      // bundled `test_framework.mjs` entry point which shares its deps with user's tests.
       return `
 <!DOCTYPE html>
 <html>
@@ -152,7 +152,7 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
       window.onload = function () {};
     </script>
     <script src="polyfills.js" type="module"></script>
-    <script src="${testRunnerImport}" type="module"></script>
+    <script src="test_framework.mjs.js" type="module"></script>
   </head>
   <body></body>
 </html>
