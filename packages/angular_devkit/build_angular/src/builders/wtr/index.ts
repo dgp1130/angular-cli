@@ -10,7 +10,6 @@ import {
   TestRunnerCoreConfig,
   defaultReporter,
 } from '@web/test-runner';
-import { promises as fs } from 'fs';
 import { Glob } from 'glob';
 import path from 'path';
 import { Schema } from './schema';
@@ -30,14 +29,11 @@ export default createBuilder(
     }
 
     const passed = await runTests(ctx.workspaceRoot, testOutput);
-    ctx.logger.info(`Passed: ${passed}`); // DEBUG
     return { success: passed };
   },
 );
 
-// TODO: Experiment with JIT
 // TODO: Experiment with watch
-// TODO: Inject `TestBed.initTestEnvironment()`.
 // TODO: Do we need fake async? Inject `zone.js/testing`?
 
 async function build(
@@ -48,7 +44,7 @@ async function build(
 ): Promise<BuilderOutput> {
   const target = targetFromTargetString(options.browserTarget!);
   const testFramework = path.relative(process.cwd(), path.join(__dirname, 'test_framework.mjs'));
-  const esBuildOutput = await scheduleTargetAndForget(ctx, target, {
+  return await scheduleTargetAndForget(ctx, target, {
     entryPoints: testFiles.concat([testFramework]),
     tsConfig: options.tsConfig,
     outputPath: outputDir,
@@ -65,38 +61,6 @@ async function build(
     },
     polyfills: ['./src/polyfills.ts'], // TODO: How to load `zone.js` *and* `zone.js/testing`?
   }).toPromise();
-  if (!esBuildOutput.success) return esBuildOutput;
-
-  return await copyTemplatesAndStyles(`${ctx.workspaceRoot}/src`, outputDir);
-}
-
-async function copyTemplatesAndStyles(srcRoot: string, outDir: string): Promise<BuilderOutput> {
-  const matches = await new Promise<string[]>((resolve, reject) => {
-    new Glob('**/*.component.{html,css}', { cwd: srcRoot }, (err, matches) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(matches);
-      }
-    });
-  });
-
-  // TODO: Maintain directory structure.
-  // TODO: Add transform to inline templates and styles: https://github.com/angular/angular-cli/blob/main/packages/ngtools/webpack/src/transformers/replace_resources.ts
-  try {
-    await Promise.all(
-      matches.map((match) =>
-        fs.copyFile(path.join(srcRoot, match), path.join(outDir, path.parse(match).base)),
-      ),
-    );
-  } catch (err) {
-    return {
-      success: false,
-      error: `Failed to copy template or style:\n${(err as Error).message}`,
-    };
-  }
-
-  return { success: true };
 }
 
 async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
