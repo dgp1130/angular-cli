@@ -1,19 +1,32 @@
-import { BuilderContext, BuilderOutput, createBuilder } from '@angular-devkit/architect';
-import { targetFromTargetString, scheduleTargetAndForget } from '@angular-devkit/architect';
+/**
+ * @license
+ * Copyright Google LLC All Rights Reserved.
+ *
+ * Use of this source code is governed by an MIT-style license that can be
+ * found in the LICENSE file at https://angular.io/license
+ */
+
 import {
+  BuilderContext,
+  BuilderOutput,
+  createBuilder,
+  scheduleTargetAndForget,
+  targetFromTargetString,
+} from '@angular-devkit/architect';
+import { esbuildPlugin } from '@web/dev-server-esbuild';
+import {
+  ErrorWithLocation,
+  EventEmitter,
+  Logger,
   TestRunner,
   TestRunnerCli,
-  Logger,
-  ErrorWithLocation,
-  chromeLauncher,
-  EventEmitter,
   TestRunnerCoreConfig,
+  chromeLauncher,
   defaultReporter,
 } from '@web/test-runner';
 import { Glob } from 'glob';
 import path from 'path';
 import { Schema } from './schema';
-import { esbuildPlugin } from '@web/dev-server-esbuild';
 
 export default createBuilder(
   async (options: Schema, ctx: BuilderContext): Promise<BuilderOutput> => {
@@ -29,6 +42,7 @@ export default createBuilder(
     }
 
     const passed = await runTests(ctx.workspaceRoot, testOutput);
+
     return { success: passed };
   },
 );
@@ -42,8 +56,10 @@ async function build(
   testFiles: string[],
   outputDir: string,
 ): Promise<BuilderOutput> {
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const target = targetFromTargetString(options.browserTarget!);
   const testFramework = path.relative(process.cwd(), path.join(__dirname, 'test_framework.mjs'));
+
   return await scheduleTargetAndForget(ctx, target, {
     entryPoints: testFiles.concat([testFramework]),
     tsConfig: options.tsConfig,
@@ -130,10 +146,12 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
   runnerCli.start();
   const passed = (await once(runner, 'finished')) as boolean;
   await runner.stop();
+
   return passed;
 }
 
 // TODO: Why won't this type check?
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function once(emitter: EventEmitter<Record<string, any>>, event: string): Promise<unknown> {
   return new Promise((resolve) => {
     const onEmit = (arg: unknown): void => {
@@ -159,26 +177,32 @@ function findTestFiles(root: string): Promise<string[]> {
 // TODO: Does this really not exist anywhere?
 class ConsoleLogger implements Logger {
   log(...messages: unknown[]): void {
+    // eslint-disable-next-line no-console
     console.log(...messages);
   }
 
   debug(...messages: unknown[]): void {
+    // eslint-disable-next-line no-console
     console.debug(...messages);
   }
 
   error(...messages: unknown[]): void {
+    // eslint-disable-next-line no-console
     console.error(...messages);
   }
 
   warn(...messages: unknown[]): void {
+    // eslint-disable-next-line no-console
     console.error(...messages);
   }
 
   group(): void {
+    // eslint-disable-next-line no-console
     console.group();
   }
 
   groupEnd(): void {
+    // eslint-disable-next-line no-console
     console.groupEnd();
   }
 
