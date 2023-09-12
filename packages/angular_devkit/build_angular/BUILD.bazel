@@ -161,7 +161,6 @@ ts_library(
         "@npm//@types/semver",
         "@npm//@types/text-table",
         "@npm//@vitejs/plugin-basic-ssl",
-        "@npm//@web/dev-server-esbuild",
         "@npm//@web/test-runner",
         "@npm//ajv",
         "@npm//ansi-colors",

@@ -6,14 +6,8 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {
-  BuilderContext,
-  BuilderOutput,
-  createBuilder,
-  scheduleTargetAndForget,
-  targetFromTargetString,
-} from '@angular-devkit/architect';
-import { esbuildPlugin } from '@web/dev-server-esbuild';
+import { BuilderContext, BuilderOutput, createBuilder } from '@angular-devkit/architect';
+import { JsonArray } from '@angular-devkit/core';
 import {
   ErrorWithLocation,
   EventEmitter,
@@ -24,24 +18,52 @@ import {
   chromeLauncher,
   defaultReporter,
 } from '@web/test-runner';
-import { Glob } from 'glob';
+import fastGlob, { Options as GlobOptions } from 'fast-glob';
 import path from 'path';
+import { buildApplicationInternal } from '../application';
+import { OutputHashing } from '../browser-esbuild/schema';
 import { Schema } from './schema';
 
 export default createBuilder(
   async (options: Schema, ctx: BuilderContext): Promise<BuilderOutput> => {
     // TODO: Source root constant?
-    const testFiles = (await findTestFiles(`${ctx.workspaceRoot}/src`)).map((file) =>
-      path.relative(process.cwd(), file),
+    const testFiles = Array.from(await findTestFiles(options, `${ctx.workspaceRoot}/src`)).map(
+      (file) => path.relative(process.cwd(), path.join('src', file)),
     );
-    const testOutput = 'dist/test-out';
+    const outputPath = 'dist/test-out';
 
-    const buildOutput = await build(ctx, options, testFiles, testOutput);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const testFramework = path.relative(process.cwd(), path.join(__dirname, 'test_framework.mjs'));
+
+    const buildOutput = await first(
+      buildApplicationInternal(
+        {
+          entryPoints: new Set(testFiles.concat([testFramework])),
+          tsConfig: options.tsConfig,
+          outputPath,
+          aot: false,
+          index: false,
+          outputHashing: OutputHashing.None,
+          optimization: false,
+          externalDependencies: ['/node_modules/@web/test-runner-core/browser/session.js'],
+          sourceMap: {
+            scripts: true,
+            styles: true,
+            vendor: true,
+          },
+          polyfills:
+            typeof options.polyfills === 'string'
+              ? [options.polyfills]
+              : options.polyfills ?? ['zone.js', 'zone.js/testing'],
+        },
+        ctx,
+      ),
+    );
     if (!buildOutput.success) {
       return buildOutput;
     }
 
-    const passed = await runTests(ctx.workspaceRoot, testOutput);
+    const passed = await runTests(ctx, outputPath);
 
     return { success: passed };
   },
@@ -50,49 +72,28 @@ export default createBuilder(
 // TODO: Experiment with watch
 // TODO: Do we need fake async? Inject `zone.js/testing`?
 
-async function build(
-  ctx: BuilderContext,
-  options: Schema,
-  testFiles: string[],
-  outputDir: string,
-): Promise<BuilderOutput> {
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const target = targetFromTargetString(options.browserTarget!);
-  const testFramework = path.relative(process.cwd(), path.join(__dirname, 'test_framework.mjs'));
+async function first<T>(generator: AsyncIterable<T>): Promise<T> {
+  for await (const value of generator) {
+    return value;
+  }
 
-  return await scheduleTargetAndForget(ctx, target, {
-    entryPoints: testFiles.concat([testFramework]),
-    tsConfig: options.tsConfig,
-    outputPath: outputDir,
-    outputHashing: 'none',
-    // aot: false, // TODO: JIT not supported.
-    commonChunk: false,
-    optimization: false,
-    buildOptimizer: false,
-    externalDependencies: ['/node_modules/@web/test-runner-core/browser/session.js'],
-    sourceMap: {
-      scripts: true,
-      styles: true,
-      vendor: true,
-    },
-    polyfills: ['./src/polyfills.ts'], // TODO: How to load `zone.js` *and* `zone.js/testing`?
-  }).toPromise();
+  throw new Error('Expected generator to emit at least once.');
 }
 
-async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
+async function runTests(ctx: BuilderContext, testDir: string): Promise<boolean> {
   const config: TestRunnerCoreConfig = {
-    rootDir: wkspRoot,
+    rootDir: ctx.workspaceRoot,
     files: [
       `${testDir}/**/*.js`,
       `!${testDir}/polyfills.js`,
       `!${testDir}/chunk-*.js`,
-      `!${testDir}/test_framework.mjs.js`,
+      `!${testDir}/test_framework.js`,
     ],
     testFramework: {
       config: {
         defaultTimeoutInterval: 5_000,
       },
-      path: `${testDir}/test_framework.mjs.js`,
+      path: `${testDir}/test_framework.js`,
     },
     concurrentBrowsers: 1,
     concurrency: 1,
@@ -100,15 +101,13 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
     hostname: 'localhost',
     port: 9876,
     browsers: [chromeLauncher({ launchOptions: { args: ['--no-sandbox'] } })],
-    logger: new ConsoleLogger(),
+    logger: new BuilderLogger(ctx.logger),
     reporters: [defaultReporter()],
-    // plugins: [esbuildPlugin({target: 'auto'})],
     watch: false,
     coverageConfig: {},
     browserStartTimeout: 5_000,
     testsStartTimeout: 5_000,
     testsFinishTimeout: 5_000,
-    manual: true, // DEBUG
     testRunnerHtml(_testRunnerImport, _config) {
       // Don't use `_testRunnerImport` because it gets resolved to an `/__web-test-runner__/...`
       // path which duplicates its chunked dependencies. Instead, we need to directly reference the
@@ -132,7 +131,7 @@ async function runTests(wkspRoot: string, testDir: string): Promise<boolean> {
       window.onload = function () {};
     </script>
     <script src="polyfills.js" type="module"></script>
-    <script src="test_framework.mjs.js" type="module"></script>
+    <script src="test_framework.js" type="module"></script>
   </head>
   <body></body>
 </html>
@@ -162,48 +161,57 @@ function once(emitter: EventEmitter<Record<string, any>>, event: string): Promis
   });
 }
 
-function findTestFiles(root: string): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    new Glob('**/*.spec.ts', { cwd: root }, (err, matches) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(matches.map((match) => `${root}/${match}`));
-      }
-    });
-  });
+async function findTestFiles(
+  options: Schema,
+  root: string,
+  glob: typeof fastGlob = fastGlob,
+): Promise<Set<string>> {
+  const globOptions: GlobOptions = {
+    cwd: root,
+    ignore: ['node_modules/**'],
+    braceExpansion: false, // Do not expand `a{b,c}` to `ab,ac`.
+    extglob: false, // Disable "extglob" patterns.
+    onlyFiles: true,
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const included = await Promise.all(options.include!.map((pattern) => glob(pattern, globOptions)));
+
+  // Flatten and deduplicate any files found in multiple include patterns.
+  return new Set(included.flat());
 }
 
-// TODO: Does this really not exist anywhere?
-class ConsoleLogger implements Logger {
+class BuilderLogger implements Logger {
+  constructor(private readonly logger: BuilderContext['logger']) {}
+
+  private parseMessage(message: unknown[]): [message: string, content: { data: JsonArray }] {
+    const msg = typeof message[0] === 'string' ? message[0] : '';
+
+    return [msg, { data: message.slice(1) as JsonArray }];
+  }
+
   log(...messages: unknown[]): void {
-    // eslint-disable-next-line no-console
-    console.log(...messages);
+    this.logger.info(...this.parseMessage(messages));
   }
 
   debug(...messages: unknown[]): void {
-    // eslint-disable-next-line no-console
-    console.debug(...messages);
+    this.logger.debug(...this.parseMessage(messages));
   }
 
   error(...messages: unknown[]): void {
-    // eslint-disable-next-line no-console
-    console.error(...messages);
+    this.logger.error(...this.parseMessage(messages));
   }
 
   warn(...messages: unknown[]): void {
-    // eslint-disable-next-line no-console
-    console.error(...messages);
+    this.logger.warn(...this.parseMessage(messages));
   }
 
   group(): void {
-    // eslint-disable-next-line no-console
-    console.group();
+    // Do nothing, grouping not supported by build context logger.
   }
 
   groupEnd(): void {
-    // eslint-disable-next-line no-console
-    console.groupEnd();
+    // Do nothing, grouping not supported by build context logger.
   }
 
   logSyntaxError(error: ErrorWithLocation): void {
