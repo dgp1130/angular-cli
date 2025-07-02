@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AngularWorkspace } from '../../utilities/config';
 import { VERSION } from '../../utilities/version';
+import { SerializedTree, Tree } from './tree';
 
 export async function createMcpServer(context: {
   workspace?: AngularWorkspace;
@@ -70,6 +71,46 @@ export async function createMcpServer(context: {
             text:
               'Projects in the Angular workspace: ' +
               [...context.workspace.projects.keys()].join(','),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_di_graph',
+    {
+      title: 'Get dependency injection graph',
+      description: 'Get the dependency injection graph of the running application.',
+    },
+    async () => {
+      const res = await fetch('http://localhost:4201/di-graph');
+      if (!res.ok) {
+        throw new Error('Failed to load DI graph.');
+      }
+
+      const json = (await res.json()) as { analysis: { providers: SerializedTree[] } };
+      const diGraph = json.analysis.providers.map((provider) =>
+        Tree.deserialize(provider, (node) => ({
+          tagName: (node as any).tagName,
+          providers: (node as any).providers,
+        })),
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              'The DI graph is:\n\n' +
+              diGraph
+                .map((tree) =>
+                  tree.print(
+                    (node) =>
+                      `${(node as any).tagName} provides ${(node as any).providers.join(', ')}`,
+                  ),
+                )
+                .join('\n'),
           },
         ],
       };
