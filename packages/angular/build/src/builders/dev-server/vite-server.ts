@@ -39,6 +39,7 @@ import {
 } from './internal';
 import type { NormalizedDevServerOptions } from './options';
 import type { DevServerBuilderOutput } from './output';
+import { DevToolsProxy } from './devtools-proxy';
 
 interface OutputFileRecord {
   contents: Uint8Array;
@@ -504,6 +505,12 @@ export async function* serveWithVite(
           context.logger.info('Page reload sent to client(s).');
         },
       );
+
+      const devtoolsProxy = DevToolsProxy.serve({ context, port: 4201 });
+      server.hot.on('angular:di-graph', (msg) => {
+        context.logger.info(`di graph: ${JSON.stringify(msg)}`);
+        devtoolsProxy.updateDiGraph(msg);
+      });
 
       const urls = server.resolvedUrls;
       if (urls && (urls.local.length || urls.network.length)) {
