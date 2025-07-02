@@ -428,6 +428,12 @@ importers:
       '@angular/ssr':
         specifier: workspace:*
         version: link:../ssr
+      '@types/express':
+        specifier: ~5.0.1
+        version: 5.0.3
+      express:
+        specifier: 5.1.0
+        version: 5.1.0
       jsdom:
         specifier: 26.1.0
         version: 26.1.0(bufferutil@4.0.9)(utf-8-validate@6.0.5)
@@ -7509,7 +7515,6 @@ packages:
     engines: {node: '>=0.6.0', teleport: '>=0.2.0'}
     deprecated: |-
       You or someone you depend on is using Q, the JavaScript Promise library that gave JavaScript developers strong feelings about promises. They can almost certainly migrate to the native JavaScript promise now. Thank you literally everyone for joining me in this bet against the odds. Be excellent to each other.
-
       (For a CapTP with native promises, see @endo/eventual-send and @endo/captp)
 
   qjobs@1.2.0:
@@ -11682,7 +11687,7 @@ snapshots:
 
   '@types/connect-history-api-fallback@1.5.4':
     dependencies:
-      '@types/express-serve-static-core': 4.19.6
+      '@types/express-serve-static-core': 5.0.7
       '@types/node': 22.17.2
 
   '@types/connect@3.4.38':

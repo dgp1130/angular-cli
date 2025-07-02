@@ -28,6 +28,7 @@ import {
   isZonelessApp,
   transformSupportedBrowsersToTargets,
 } from '../internal';
+import { DevToolsProxy } from './devtools-proxy';
 import type { NormalizedDevServerOptions } from '../options';
 import type { DevServerBuilderOutput } from '../output';
 import { handleUpdate, invalidateUpdatedFiles } from './hmr';
@@ -498,6 +499,12 @@ export async function* serveWithVite(
           context.logger.info('Page reload sent to client(s).');
         },
       );
+
+      const devtoolsProxy = DevToolsProxy.serve({ context, port: 4201 });
+      server.hot.on('angular:di-graph', (msg) => {
+        context.logger.info(`di graph: ${JSON.stringify(msg)}`);
+        devtoolsProxy.updateDiGraph(msg);
+      });
 
       const urls = server.resolvedUrls;
       if (urls && (urls.local.length || urls.network.length)) {

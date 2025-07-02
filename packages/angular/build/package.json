@@ -49,8 +49,10 @@
     "lmdb": "3.4.2"
   },
   "devDependencies": {
-    "@angular/ssr": "workspace:*",
     "@angular-devkit/core": "workspace:*",
+    "@angular/ssr": "workspace:*",
+    "@types/express": "~5.0.1",
+    "express": "5.1.0",
     "jsdom": "26.1.0",
     "less": "4.4.1",
     "ng-packagr": "21.0.0-next.0",
@@ -59,9 +61,9 @@
     "vitest": "3.2.4"
   },
   "peerDependencies": {
-    "@angular/core": "0.0.0-ANGULAR-FW-PEER-DEP",
     "@angular/compiler": "0.0.0-ANGULAR-FW-PEER-DEP",
     "@angular/compiler-cli": "0.0.0-ANGULAR-FW-PEER-DEP",
+    "@angular/core": "0.0.0-ANGULAR-FW-PEER-DEP",
     "@angular/localize": "0.0.0-ANGULAR-FW-PEER-DEP",
     "@angular/platform-browser": "0.0.0-ANGULAR-FW-PEER-DEP",
     "@angular/platform-server": "0.0.0-ANGULAR-FW-PEER-DEP",
