@@ -17,6 +17,7 @@ import { FIND_EXAMPLE_TOOL } from './tools/examples';
 import { MODERNIZE_TOOL } from './tools/modernize';
 import { LIST_PROJECTS_TOOL } from './tools/projects';
 import { AnyMcpToolDeclaration, registerTools } from './tools/tool-registry';
+import { SerializedTree, Tree } from './tree';
 
 /**
  * The set of tools that are enabled by default for the MCP server.
@@ -71,6 +72,46 @@ export async function createMcpServer(
       exampleDatabasePath: path.join(__dirname, '../../../lib/code-examples.db'),
     },
     toolDeclarations,
+  );
+
+  server.registerTool(
+    'get_di_graph',
+    {
+      title: 'Get dependency injection graph',
+      description: 'Get the dependency injection graph of the running application.',
+    },
+    async () => {
+      const res = await fetch('http://localhost:4201/di-graph');
+      if (!res.ok) {
+        throw new Error('Failed to load DI graph.');
+      }
+
+      const json = (await res.json()) as { analysis: { providers: SerializedTree[] } };
+      const diGraph = json.analysis.providers.map((provider) =>
+        Tree.deserialize(provider, (node) => ({
+          tagName: (node as any).tagName,
+          providers: (node as any).providers,
+        })),
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              'The DI graph is:\n\n' +
+              diGraph
+                .map((tree) =>
+                  tree.print(
+                    (node) =>
+                      `${(node as any).tagName} provides ${(node as any).providers.join(', ')}`,
+                  ),
+                )
+                .join('\n'),
+          },
+        ],
+      };
+    },
   );
 
   return server;
