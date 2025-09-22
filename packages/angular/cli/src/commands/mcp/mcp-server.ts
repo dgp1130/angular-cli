@@ -83,9 +83,9 @@ export async function createMcpServer(
     async () => {
       // Wait 45s to give the devserver time to reload if necessary so we're less likely
       // to serve stale data.
-      await new Promise<void>((resolve) => {
-        setTimeout(() => void resolve(), 45_000);
-      });
+      // await new Promise<void>((resolve) => {
+      //   setTimeout(() => void resolve(), 45_000);
+      // });
 
       const res = await fetch('http://localhost:4201/di-graph');
       if (!res.ok) {
