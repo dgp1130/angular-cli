@@ -1,3 +1,21 @@
+<a name="20.3.18"></a>
+
+# 20.3.18 (2026-02-26)
+
+### @angular-devkit/core
+
+| Commit                                                                                              | Type | Description              |
+| --------------------------------------------------------------------------------------------------- | ---- | ------------------------ |
+| [39596d529](https://github.com/angular/angular-cli/commit/39596d529f831f72a2134bc3c9ac163867ff5702) | fix  | update `ajv` to `8.18.0` |
+
+### @angular/build
+
+| Commit                                                                                              | Type | Description             |
+| --------------------------------------------------------------------------------------------------- | ---- | ----------------------- |
+| [f668e2778](https://github.com/angular/angular-cli/commit/f668e2778c4c4dbecc8a1c6831c092f5512d1ec1) | fix  | update rollup to 4.59.0 |
+
+<!-- CHANGELOG SPLIT MARKER -->
+
 <a name="19.2.22"></a>
 
 # 19.2.22 (2026-02-26)
@@ -2423,7 +2441,6 @@
 - Protractor is no longer supported.
 
   Protractor was marked end-of-life in August 2023 (see https://protractortest.org/). Projects still relying on Protractor should consider migrating to another E2E testing framework, several support solid migration paths from Protractor.
-
   - https://angular.dev/tools/cli/end-to-end
   - https://blog.angular.dev/the-state-of-end-to-end-testing-with-angular-d175f751cb9c
 
@@ -6058,7 +6075,6 @@ Alan Agius, Charles Lyding and Doug Parker
 ### @angular/cli
 
 - Several changes to the `ng analytics` command syntax.
-
   - `ng analytics project <setting>` has been replaced with `ng analytics <setting>`
   - `ng analytics <setting>` has been replaced with `ng analytics <setting> --global`
 
@@ -6088,7 +6104,6 @@ Alan Agius, Charles Lyding and Doug Parker
 - `browser` and `karma` builders `script` and `styles` options input files extensions are now validated.
 
   Valid extensions for `scripts` are:
-
   - `.js`
   - `.cjs`
   - `.mjs`
@@ -6097,7 +6112,6 @@ Alan Agius, Charles Lyding and Doug Parker
   - `.mjsx`
 
   Valid extensions for `styles` are:
-
   - `.css`
   - `.less`
   - `.sass`
